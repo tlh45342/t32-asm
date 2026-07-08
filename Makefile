@@ -1,27 +1,40 @@
-# t32-asm top-level Makefile 
+# t32-asm top-level Makefile
 
-#
-CC      := gcc
+CC      ?= gcc
+CFLAGS  ?= -Wall -Wextra -O2
 
-# GNU coreutils shim (matches libvm style). Override if needed.
-GNU_BIN ?= C:/Program Files/GNU/bin
-MKDIR_P ?= "$(GNU_BIN)/mkdir.exe" -p
-RM_RF   ?= "$(GNU_BIN)/rm.exe" -rf
-CP      ?= "$(GNU_BIN)/cp.exe" -f
+UNAME_S := $(shell uname -s 2>/dev/null)
 
-BIN_DIR   := bin
-BUILD_DIR := build
+ifeq ($(OS),Windows_NT)
+    EXEEXT := .exe
 
-T32ASM := t32-asm.exe
+    GNU_BIN ?= C:/Program Files/GNU/bin
+    MKDIR_P ?= "$(GNU_BIN)/mkdir.exe" -p
+    RM_RF   ?= "$(GNU_BIN)/rm.exe" -rf
+    CP      ?= "$(GNU_BIN)/cp.exe" -f
 
-all: $(T32ASM)
+    PREFIX ?= C:/Program Files/libvm
+else
+    EXEEXT :=
+    MKDIR_P ?= mkdir -p
+    RM_RF   ?= rm -rf
+    CP      ?= cp -f
 
-# Install prefix (override: make PREFIX="C:/Program Files/libvm" install)
-PREFIX ?= C:/Program Files/libvm
+    PREFIX ?= /usr/local
+endif
 
-$(T32ASM): t32-asm.c
-	$(CC) t32-asm.c -o t32-asm.exe
-	
-install: $(T32ASM)
+TARGET := t32-asm$(EXEEXT)
+
+all: $(TARGET)
+
+$(TARGET): t32-asm.c
+	$(CC) $(CFLAGS) t32-asm.c -o $(TARGET)
+
+install: $(TARGET)
 	@$(MKDIR_P) "$(PREFIX)/bin"
-	@$(CP) "$(T32ASM)" "$(PREFIX)/bin/"
+	@$(CP) "$(TARGET)" "$(PREFIX)/bin/"
+
+clean:
+	@$(RM_RF) "$(TARGET)"
+
+.PHONY: all install clean
