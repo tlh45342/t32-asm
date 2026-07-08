@@ -392,7 +392,10 @@ int main(int argc, char **argv) {
             return 1;
         }
 
-        strncpy(lines[line_count].text, buf, sizeof(lines[line_count].text) - 1);
+        snprintf(lines[line_count].text,
+         sizeof(lines[line_count].text),
+         "%s",
+         buf);
         lines[line_count].line_no = line_no;
         line_count++;
     }
