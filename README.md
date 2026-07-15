@@ -35,13 +35,13 @@ echo "$PATH"
 The original positional form remains supported:
 
 ```bash
-t32-asm input.asm output.t32
+t32-asm input.s output.t32
 ```
 
 The preferred test/toolchain form is:
 
 ```bash
-t32-asm -f bin input.asm -o output.bin
+t32-asm -f bin input.s -o output.bin
 ```
 
 Long options are also supported:

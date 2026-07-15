@@ -27,7 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define T32_ASM_VERSION "0.0.2"
+#define T32_ASM_VERSION "0.0.4"
 
 #define MAX_LINES   8192
 #define MAX_SYMS    4096
@@ -45,19 +45,96 @@ typedef struct {
     int verbose;
 } options_t;
 
-enum {
-    OP_HALT = 0x00,
-    OP_MOV  = 0x01,
-    OP_MOVI = 0x02,
-    OP_ADD  = 0x03,
-    OP_ADDI = 0x04,
-    OP_SUB  = 0x05,
-    OP_SUBI = 0x06,
-    OP_LDB  = 0x07,
-    OP_STB  = 0x08,
-    OP_JMP  = 0x09,
-    OP_JZ   = 0x0A,
-    OP_JNZ  = 0x0B
+enum
+{
+    /*----------------------------------------------------------
+     * System
+     *----------------------------------------------------------*/
+
+    OP_HALT    = 0x00,
+    OP_NOP     = 0x01,
+    OP_TRAP    = 0x02,
+    OP_IRET    = 0x03,
+    OP_CPUID   = 0x04,
+
+    /* 0x05 - 0x07 Reserved */
+
+    /*----------------------------------------------------------
+     * Register Movement
+     *----------------------------------------------------------*/
+
+    OP_MOV     = 0x08,
+    OP_MOVI    = 0x09,
+
+    /* 0x0A - 0x0F Reserved */
+
+    /*----------------------------------------------------------
+     * Memory
+     *----------------------------------------------------------*/
+
+    OP_LDB     = 0x10,
+    OP_LDH     = 0x11,
+    OP_LDW     = 0x12,
+
+    OP_STB     = 0x13,
+    OP_STH     = 0x14,
+    OP_STW     = 0x15,
+
+    /* 0x16 - 0x17 Reserved */
+
+    /*----------------------------------------------------------
+     * Arithmetic
+     *----------------------------------------------------------*/
+
+    OP_ADD     = 0x18,
+    OP_ADDI    = 0x19,
+
+    OP_SUB     = 0x1A,
+    OP_SUBI    = 0x1B,
+
+    OP_MUL     = 0x1C,
+    OP_MULU    = 0x1D,
+
+    OP_DIV     = 0x1E,
+    OP_DIVU    = 0x1F,
+
+    /*----------------------------------------------------------
+     * Logic
+     *----------------------------------------------------------*/
+
+    OP_AND     = 0x20,
+    OP_OR      = 0x21,
+    OP_XOR     = 0x22,
+    OP_NOT     = 0x23,
+
+    OP_SHL     = 0x24,
+    OP_SHR     = 0x25,
+    OP_SAR     = 0x26,
+
+    /* 0x27 Reserved */
+
+    /*----------------------------------------------------------
+     * Compare / Branch
+     *----------------------------------------------------------*/
+
+    OP_CMP     = 0x28,
+    OP_CMPI    = 0x29,
+
+    OP_JMP     = 0x2A,
+    OP_JZ      = 0x2B,
+    OP_JNZ     = 0x2C,
+
+    /* 0x2D - 0x2F Reserved */
+
+    /*----------------------------------------------------------
+     * Stack / Call
+     *----------------------------------------------------------*/
+
+    OP_PUSH    = 0x30,
+    OP_POP     = 0x31,
+
+    OP_CALL    = 0x32,
+    OP_RET     = 0x33
 };
 
 typedef struct {
@@ -303,6 +380,7 @@ static int tokenize(char *text, char *tokens[])
     return count;
 }
 
+
 static uint32_t instruction_size(char *line, int line_number)
 {
     char temporary[MAX_LINE];
@@ -344,12 +422,15 @@ static uint32_t instruction_size(char *line, int line_number)
         fail_line(line_number, "unknown directive");
     }
 
-    if (strcmp(tokens[0], "movi") == 0 ||
+    if (strcmp(tokens[0], "trap") == 0 ||
+        strcmp(tokens[0], "movi") == 0 ||
         strcmp(tokens[0], "addi") == 0 ||
         strcmp(tokens[0], "subi") == 0 ||
+        strcmp(tokens[0], "cmpi") == 0 ||
         strcmp(tokens[0], "jmp") == 0 ||
         strcmp(tokens[0], "jz") == 0 ||
-        strcmp(tokens[0], "jnz") == 0) {
+        strcmp(tokens[0], "jnz") == 0 ||
+        strcmp(tokens[0], "call") == 0) {
         return 8;
     }
 
@@ -466,6 +547,7 @@ static void emit_ascii(
     }
 }
 
+
 static void emit_instruction(
     FILE *output,
     char *tokens[],
@@ -475,155 +557,179 @@ static void emit_instruction(
 {
     const char *operation = tokens[0];
 
+#define REQUIRE_COUNT(expected, usage_text) \
+    do { if (count != (expected)) fail_line(line_number, (usage_text)); } while (0)
+
+#define EMIT0(opcode_value) \
+    write_u32(output, encode_instruction((opcode_value), 0, 0, 0))
+
+#define EMIT_R(opcode_value, reg_a) \
+    write_u32(output, encode_instruction((opcode_value), \
+        (uint8_t)parse_register((reg_a), line_number), 0, 0))
+
+#define EMIT_RA(opcode_value, reg_a) \
+    write_u32(output, encode_instruction((opcode_value), 0, \
+        (uint8_t)parse_register((reg_a), line_number), 0))
+
+#define EMIT_RR(opcode_value, rd_text, ra_text) \
+    write_u32(output, encode_instruction((opcode_value), \
+        (uint8_t)parse_register((rd_text), line_number), \
+        (uint8_t)parse_register((ra_text), line_number), 0))
+
+#define EMIT_RRR(opcode_value, rd_text, ra_text, rb_text) \
+    write_u32(output, encode_instruction((opcode_value), \
+        (uint8_t)parse_register((rd_text), line_number), \
+        (uint8_t)parse_register((ra_text), line_number), \
+        (uint8_t)parse_register((rb_text), line_number)))
+
     if (strcmp(operation, "halt") == 0) {
-        if (count != 1)
-            fail_line(line_number, "usage: halt");
+        REQUIRE_COUNT(1, "usage: halt");
+        EMIT0(OP_HALT);
+    } else if (strcmp(operation, "nop") == 0) {
+        REQUIRE_COUNT(1, "usage: nop");
+        EMIT0(OP_NOP);
+    } else if (strcmp(operation, "trap") == 0) {
+        REQUIRE_COUNT(2, "usage: trap vector");
+        EMIT0(OP_TRAP);
+        write_u32(output, parse_value(tokens[1], line_number));
+    } else if (strcmp(operation, "iret") == 0) {
+        REQUIRE_COUNT(1, "usage: iret");
+        EMIT0(OP_IRET);
+    } else if (strcmp(operation, "cpuid") == 0) {
+        REQUIRE_COUNT(2, "usage: cpuid rd");
+        EMIT_R(OP_CPUID, tokens[1]);
 
-        write_u32(output, encode_instruction(OP_HALT, 0, 0, 0));
     } else if (strcmp(operation, "mov") == 0) {
-        if (count != 3)
-            fail_line(line_number, "usage: mov rd, ra");
-
-        write_u32(
-            output,
-            encode_instruction(
-                OP_MOV,
-                (uint8_t)parse_register(tokens[1], line_number),
-                (uint8_t)parse_register(tokens[2], line_number),
-                0
-            )
-        );
+        REQUIRE_COUNT(3, "usage: mov rd, ra");
+        EMIT_RR(OP_MOV, tokens[1], tokens[2]);
     } else if (strcmp(operation, "movi") == 0) {
-        if (count != 3)
-            fail_line(line_number, "usage: movi rd, imm32");
-
-        write_u32(
-            output,
-            encode_instruction(
-                OP_MOVI,
-                (uint8_t)parse_register(tokens[1], line_number),
-                0,
-                0
-            )
-        );
+        REQUIRE_COUNT(3, "usage: movi rd, imm32");
+        EMIT_R(OP_MOVI, tokens[1]);
         write_u32(output, parse_value(tokens[2], line_number));
+
+    } else if (strcmp(operation, "ldb") == 0) {
+        REQUIRE_COUNT(3, "usage: ldb rd, [ra]");
+        EMIT_RR(OP_LDB, tokens[1], tokens[2]);
+    } else if (strcmp(operation, "ldh") == 0) {
+        REQUIRE_COUNT(3, "usage: ldh rd, [ra]");
+        EMIT_RR(OP_LDH, tokens[1], tokens[2]);
+    } else if (strcmp(operation, "ldw") == 0) {
+        REQUIRE_COUNT(3, "usage: ldw rd, [ra]");
+        EMIT_RR(OP_LDW, tokens[1], tokens[2]);
+    } else if (strcmp(operation, "stb") == 0) {
+        REQUIRE_COUNT(3, "usage: stb rb, [ra]");
+        write_u32(output, encode_instruction(
+            OP_STB, 0,
+            (uint8_t)parse_register(tokens[2], line_number),
+            (uint8_t)parse_register(tokens[1], line_number)));
+    } else if (strcmp(operation, "sth") == 0) {
+        REQUIRE_COUNT(3, "usage: sth rb, [ra]");
+        write_u32(output, encode_instruction(
+            OP_STH, 0,
+            (uint8_t)parse_register(tokens[2], line_number),
+            (uint8_t)parse_register(tokens[1], line_number)));
+    } else if (strcmp(operation, "stw") == 0) {
+        REQUIRE_COUNT(3, "usage: stw rb, [ra]");
+        write_u32(output, encode_instruction(
+            OP_STW, 0,
+            (uint8_t)parse_register(tokens[2], line_number),
+            (uint8_t)parse_register(tokens[1], line_number)));
+
     } else if (strcmp(operation, "add") == 0) {
-        if (count != 4)
-            fail_line(line_number, "usage: add rd, ra, rb");
-
-        write_u32(
-            output,
-            encode_instruction(
-                OP_ADD,
-                (uint8_t)parse_register(tokens[1], line_number),
-                (uint8_t)parse_register(tokens[2], line_number),
-                (uint8_t)parse_register(tokens[3], line_number)
-            )
-        );
+        REQUIRE_COUNT(4, "usage: add rd, ra, rb");
+        EMIT_RRR(OP_ADD, tokens[1], tokens[2], tokens[3]);
     } else if (strcmp(operation, "addi") == 0) {
-        if (count != 4)
-            fail_line(line_number, "usage: addi rd, ra, imm32");
-
-        write_u32(
-            output,
-            encode_instruction(
-                OP_ADDI,
-                (uint8_t)parse_register(tokens[1], line_number),
-                (uint8_t)parse_register(tokens[2], line_number),
-                0
-            )
-        );
+        REQUIRE_COUNT(4, "usage: addi rd, ra, imm32");
+        EMIT_RR(OP_ADDI, tokens[1], tokens[2]);
         write_u32(output, parse_value(tokens[3], line_number));
     } else if (strcmp(operation, "sub") == 0) {
-        if (count != 4)
-            fail_line(line_number, "usage: sub rd, ra, rb");
-
-        write_u32(
-            output,
-            encode_instruction(
-                OP_SUB,
-                (uint8_t)parse_register(tokens[1], line_number),
-                (uint8_t)parse_register(tokens[2], line_number),
-                (uint8_t)parse_register(tokens[3], line_number)
-            )
-        );
+        REQUIRE_COUNT(4, "usage: sub rd, ra, rb");
+        EMIT_RRR(OP_SUB, tokens[1], tokens[2], tokens[3]);
     } else if (strcmp(operation, "subi") == 0) {
-        if (count != 4)
-            fail_line(line_number, "usage: subi rd, ra, imm32");
-
-        write_u32(
-            output,
-            encode_instruction(
-                OP_SUBI,
-                (uint8_t)parse_register(tokens[1], line_number),
-                (uint8_t)parse_register(tokens[2], line_number),
-                0
-            )
-        );
+        REQUIRE_COUNT(4, "usage: subi rd, ra, imm32");
+        EMIT_RR(OP_SUBI, tokens[1], tokens[2]);
         write_u32(output, parse_value(tokens[3], line_number));
-    } else if (strcmp(operation, "ldb") == 0) {
-        if (count != 3)
-            fail_line(line_number, "usage: ldb rd, [ra]");
+    } else if (strcmp(operation, "mul") == 0) {
+        REQUIRE_COUNT(4, "usage: mul rd, ra, rb");
+        EMIT_RRR(OP_MUL, tokens[1], tokens[2], tokens[3]);
+    } else if (strcmp(operation, "mulu") == 0) {
+        REQUIRE_COUNT(4, "usage: mulu rd, ra, rb");
+        EMIT_RRR(OP_MULU, tokens[1], tokens[2], tokens[3]);
+    } else if (strcmp(operation, "div") == 0) {
+        REQUIRE_COUNT(4, "usage: div rd, ra, rb");
+        EMIT_RRR(OP_DIV, tokens[1], tokens[2], tokens[3]);
+    } else if (strcmp(operation, "divu") == 0) {
+        REQUIRE_COUNT(4, "usage: divu rd, ra, rb");
+        EMIT_RRR(OP_DIVU, tokens[1], tokens[2], tokens[3]);
 
-        write_u32(
-            output,
-            encode_instruction(
-                OP_LDB,
-                (uint8_t)parse_register(tokens[1], line_number),
-                (uint8_t)parse_register(tokens[2], line_number),
-                0
-            )
-        );
-    } else if (strcmp(operation, "stb") == 0) {
-        if (count != 3)
-            fail_line(line_number, "usage: stb rb, [ra]");
+    } else if (strcmp(operation, "and") == 0) {
+        REQUIRE_COUNT(4, "usage: and rd, ra, rb");
+        EMIT_RRR(OP_AND, tokens[1], tokens[2], tokens[3]);
+    } else if (strcmp(operation, "or") == 0) {
+        REQUIRE_COUNT(4, "usage: or rd, ra, rb");
+        EMIT_RRR(OP_OR, tokens[1], tokens[2], tokens[3]);
+    } else if (strcmp(operation, "xor") == 0) {
+        REQUIRE_COUNT(4, "usage: xor rd, ra, rb");
+        EMIT_RRR(OP_XOR, tokens[1], tokens[2], tokens[3]);
+    } else if (strcmp(operation, "not") == 0) {
+        REQUIRE_COUNT(3, "usage: not rd, ra");
+        EMIT_RR(OP_NOT, tokens[1], tokens[2]);
+    } else if (strcmp(operation, "shl") == 0) {
+        REQUIRE_COUNT(4, "usage: shl rd, ra, rb");
+        EMIT_RRR(OP_SHL, tokens[1], tokens[2], tokens[3]);
+    } else if (strcmp(operation, "shr") == 0) {
+        REQUIRE_COUNT(4, "usage: shr rd, ra, rb");
+        EMIT_RRR(OP_SHR, tokens[1], tokens[2], tokens[3]);
+    } else if (strcmp(operation, "sar") == 0) {
+        REQUIRE_COUNT(4, "usage: sar rd, ra, rb");
+        EMIT_RRR(OP_SAR, tokens[1], tokens[2], tokens[3]);
 
-        write_u32(
-            output,
-            encode_instruction(
-                OP_STB,
-                0,
-                (uint8_t)parse_register(tokens[2], line_number),
-                (uint8_t)parse_register(tokens[1], line_number)
-            )
-        );
+    } else if (strcmp(operation, "cmp") == 0) {
+        REQUIRE_COUNT(3, "usage: cmp ra, rb");
+        write_u32(output, encode_instruction(
+            OP_CMP, 0,
+            (uint8_t)parse_register(tokens[1], line_number),
+            (uint8_t)parse_register(tokens[2], line_number)));
+    } else if (strcmp(operation, "cmpi") == 0) {
+        REQUIRE_COUNT(3, "usage: cmpi ra, imm32");
+        EMIT_RA(OP_CMPI, tokens[1]);
+        write_u32(output, parse_value(tokens[2], line_number));
     } else if (strcmp(operation, "jmp") == 0) {
-        if (count != 2)
-            fail_line(line_number, "usage: jmp label");
-
-        write_u32(output, encode_instruction(OP_JMP, 0, 0, 0));
+        REQUIRE_COUNT(2, "usage: jmp target");
+        EMIT0(OP_JMP);
         write_u32(output, parse_value(tokens[1], line_number));
     } else if (strcmp(operation, "jz") == 0) {
-        if (count != 3)
-            fail_line(line_number, "usage: jz ra, label");
-
-        write_u32(
-            output,
-            encode_instruction(
-                OP_JZ,
-                0,
-                (uint8_t)parse_register(tokens[1], line_number),
-                0
-            )
-        );
+        REQUIRE_COUNT(3, "usage: jz ra, target");
+        EMIT_RA(OP_JZ, tokens[1]);
         write_u32(output, parse_value(tokens[2], line_number));
     } else if (strcmp(operation, "jnz") == 0) {
-        if (count != 3)
-            fail_line(line_number, "usage: jnz ra, label");
-
-        write_u32(
-            output,
-            encode_instruction(
-                OP_JNZ,
-                0,
-                (uint8_t)parse_register(tokens[1], line_number),
-                0
-            )
-        );
+        REQUIRE_COUNT(3, "usage: jnz ra, target");
+        EMIT_RA(OP_JNZ, tokens[1]);
         write_u32(output, parse_value(tokens[2], line_number));
+
+    } else if (strcmp(operation, "push") == 0) {
+        REQUIRE_COUNT(2, "usage: push ra");
+        EMIT_RA(OP_PUSH, tokens[1]);
+    } else if (strcmp(operation, "pop") == 0) {
+        REQUIRE_COUNT(2, "usage: pop rd");
+        EMIT_R(OP_POP, tokens[1]);
+    } else if (strcmp(operation, "call") == 0) {
+        REQUIRE_COUNT(2, "usage: call target");
+        EMIT0(OP_CALL);
+        write_u32(output, parse_value(tokens[1], line_number));
+    } else if (strcmp(operation, "ret") == 0) {
+        REQUIRE_COUNT(1, "usage: ret");
+        EMIT0(OP_RET);
     } else {
         fail_line(line_number, "unknown instruction");
     }
+
+#undef EMIT_RRR
+#undef EMIT_RR
+#undef EMIT_RA
+#undef EMIT_R
+#undef EMIT0
+#undef REQUIRE_COUNT
 }
 
 static void second_pass_binary(FILE *output)
