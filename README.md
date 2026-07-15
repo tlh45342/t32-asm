@@ -1,3 +1,27 @@
+# t32-asm 0.0.6
+
+The T32 flat-binary assembler. Version 0.0.6 adds `.org` support for assigning logical addresses to labels without padding the output image.
+
+Example:
+
+```asm
+.org 0x1000
+start:
+    movi r0, 42
+    halt
+```
+
+Build and verify:
+
+```text
+make clean
+make
+make test
+make install
+```
+
+---
+
 # t32-asm
 
 `t32-asm` is the assembler for the T32 instruction set and is part of the

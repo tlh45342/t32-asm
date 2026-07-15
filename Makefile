@@ -52,7 +52,7 @@ all: $(TARGET)
 $(TARGET): $(OBJECT)
 	$(CC) $(OBJECT) -o $(TARGET)
 
-$(OBJECT): $(SRC_DIR)/t32-asm.c
+$(OBJECT): $(SRC_DIR)/t32-asm.c $(SRC_DIR)/include/version.h
 	@$(MKDIR_P) "$(BUILD_DIR)"
 	$(CC) $(CFLAGS) -c $< -o $@
 

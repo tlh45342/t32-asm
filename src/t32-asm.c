@@ -16,6 +16,9 @@
  *
  *   bin     Flat, directly loadable T32 binary image.
  *
+ * Directives include .org, .equ, .byte, .word, and .ascii.
+ * .org changes logical addresses only; it does not pad the output file.
+ *
  * Future formats such as "obj" should be introduced through the output-format
  * dispatch layer rather than by changing the command-line parser again.
  */
@@ -27,7 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define T32_ASM_VERSION "0.0.4"
+#include "include/version.h"
 
 #define MAX_LINES   8192
 #define MAX_SYMS    4096
@@ -154,6 +157,14 @@ static int symbol_count = 0;
 static source_line_t source_lines[MAX_LINES];
 static int source_line_count = 0;
 
+/*
+ * Flat-binary origin. .org changes logical addresses used for labels, but
+ * does not emit padding bytes. It is intentionally restricted to one use
+ * before the first emitted byte.
+ */
+static uint32_t assembly_origin = 0;
+static int origin_seen = 0;
+
 static void print_usage(FILE *stream, const char *program)
 {
     fprintf(
@@ -243,6 +254,8 @@ static void reset_assembler_state(void)
 {
     symbol_count = 0;
     source_line_count = 0;
+    assembly_origin = 0;
+    origin_seen = 0;
     memset(symbols, 0, sizeof(symbols));
     memset(source_lines, 0, sizeof(source_lines));
 }
@@ -416,7 +429,8 @@ static uint32_t instruction_size(char *line, int line_number)
             return (uint32_t)(last_quote - first_quote - 1);
         }
 
-        if (strcmp(tokens[0], ".equ") == 0)
+        if (strcmp(tokens[0], ".equ") == 0 ||
+            strcmp(tokens[0], ".org") == 0)
             return 0;
 
         fail_line(line_number, "unknown directive");
@@ -440,6 +454,7 @@ static uint32_t instruction_size(char *line, int line_number)
 static void first_pass(void)
 {
     uint32_t program_counter = 0;
+    int emitted_content = 0;
     int index;
 
     for (index = 0; index < source_line_count; ++index) {
@@ -503,10 +518,41 @@ static void first_pass(void)
                 );
                 continue;
             }
+
+            if (strncmp(temporary, ".org", 4) == 0) {
+                char *tokens[MAX_TOKENS];
+                int count = tokenize(temporary, tokens);
+
+                if (count != 2)
+                    fail_line(
+                        line->line_number,
+                        "usage: .org ADDRESS"
+                    );
+
+                if (origin_seen)
+                    fail_line(
+                        line->line_number,
+                        ".org may appear only once"
+                    );
+
+                if (emitted_content)
+                    fail_line(
+                        line->line_number,
+                        ".org must appear before code or data"
+                    );
+
+                assembly_origin =
+                    parse_value(tokens[1], line->line_number);
+                program_counter = assembly_origin;
+                origin_seen = 1;
+                line->address = program_counter;
+                continue;
+            }
         }
 
         program_counter +=
             instruction_size(line->text, line->line_number);
+        emitted_content = 1;
     }
 }
 
@@ -774,7 +820,8 @@ static void second_pass_binary(FILE *output)
             continue;
 
         if (tokens[0][0] == '.') {
-            if (strcmp(tokens[0], ".equ") == 0) {
+            if (strcmp(tokens[0], ".equ") == 0 ||
+                strcmp(tokens[0], ".org") == 0) {
                 continue;
             } else if (strcmp(tokens[0], ".byte") == 0) {
                 if (count != 2)
@@ -851,7 +898,7 @@ static int parse_options(int argc, char **argv, options_t *options)
             print_usage(stdout, argv[0]);
             exit(EXIT_SUCCESS);
         } else if (strcmp(argument, "--version") == 0) {
-            printf("t32-asm %s\n", T32_ASM_VERSION);
+            printf("%s %s\n", T32_PRODUCT, T32_VERSION_STRING);
             exit(EXIT_SUCCESS);
         } else if (strcmp(argument, "-v") == 0 ||
                    strcmp(argument, "--verbose") == 0) {
